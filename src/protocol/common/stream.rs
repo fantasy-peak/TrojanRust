@@ -16,7 +16,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> AsyncRead for StandardTcpStream<S
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
-            StandardTcpStream::Plain(ref mut s) => Pin::new(s).poll_read(cx, buf),
+            StandardTcpStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
             StandardTcpStream::RustlsServer(s) => Pin::new(s).poll_read(cx, buf),
             StandardTcpStream::RustlsClient(s) => Pin::new(s).poll_read(cx, buf),
         }
@@ -31,18 +31,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> AsyncWrite for StandardTcpStream<
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
         match self.get_mut() {
-            StandardTcpStream::Plain(ref mut s) => Pin::new(s).poll_write(cx, buf),
-            StandardTcpStream::RustlsServer(ref mut s) => Pin::new(s).poll_write(cx, buf),
-            StandardTcpStream::RustlsClient(ref mut s) => Pin::new(s).poll_write(cx, buf),
+            StandardTcpStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
+            StandardTcpStream::RustlsServer(s) => Pin::new(s).poll_write(cx, buf),
+            StandardTcpStream::RustlsClient(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
     #[inline]
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         match self.get_mut() {
-            StandardTcpStream::Plain(ref mut s) => Pin::new(s).poll_flush(cx),
-            StandardTcpStream::RustlsServer(ref mut s) => Pin::new(s).poll_flush(cx),
-            StandardTcpStream::RustlsClient(ref mut s) => Pin::new(s).poll_flush(cx),
+            StandardTcpStream::Plain(s) => Pin::new(s).poll_flush(cx),
+            StandardTcpStream::RustlsServer(s) => Pin::new(s).poll_flush(cx),
+            StandardTcpStream::RustlsClient(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
@@ -52,9 +52,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> AsyncWrite for StandardTcpStream<
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
         match self.get_mut() {
-            StandardTcpStream::Plain(ref mut s) => Pin::new(s).poll_shutdown(cx),
-            StandardTcpStream::RustlsServer(ref mut s) => Pin::new(s).poll_shutdown(cx),
-            StandardTcpStream::RustlsClient(ref mut s) => Pin::new(s).poll_shutdown(cx),
+            StandardTcpStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
+            StandardTcpStream::RustlsServer(s) => Pin::new(s).poll_shutdown(cx),
+            StandardTcpStream::RustlsClient(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
 }

@@ -1,12 +1,13 @@
 use crate::config::base::{OutboundConfig, OutboundMode};
-use crate::config::tls::{make_client_config, NoCertificateVerification};
+use crate::config::tls::{NoCertificateVerification, make_client_config};
 use crate::protocol::common::request::{InboundRequest, TransportProtocol};
 use crate::protocol::common::stream::StandardTcpStream;
-use crate::protocol::trojan::{self, handshake, HEX_SIZE};
+use crate::protocol::trojan::{self, HEX_SIZE, handshake};
 use crate::proxy::base::SupportedProtocols;
-use crate::transport::grpc_transport::grpc_service_client::GrpcServiceClient;
 use crate::transport::grpc_transport::Hunk;
+use crate::transport::grpc_transport::grpc_service_client::GrpcServiceClient;
 
+use async_http_proxy::http_connect_tokio;
 use futures::Stream;
 use log::{info, warn};
 use once_cell::sync::OnceCell;
@@ -20,8 +21,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, B
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::mpsc::{self, Sender};
 use tokio_rustls::TlsConnector;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 
 /// A list of ALPN that the client should support.
@@ -108,10 +109,14 @@ impl TcpHandler {
         &self,
         inbound_stream: StandardTcpStream<T>,
         request: InboundRequest,
+        outbound_config: &'static OutboundConfig,
     ) -> io::Result<()> {
         match self.mode {
             OutboundMode::DIRECT => self.handle_direct_stream(request, inbound_stream).await?,
-            OutboundMode::TCP => self.handle_tcp_stream(request, inbound_stream).await?,
+            OutboundMode::TCP => {
+                self.handle_tcp_stream(request, inbound_stream, outbound_config)
+                    .await?
+            }
             OutboundMode::QUIC => self.handle_quic_stream(request, inbound_stream).await?,
             OutboundMode::GRPC => self.handle_grpc_stream(request, inbound_stream).await?,
         }
@@ -148,7 +153,7 @@ impl TcpHandler {
                                 return Err(Error::new(
                                     ErrorKind::ConnectionRefused,
                                     format!("failed to connect to tcp {}: {}", addr, e),
-                                ))
+                                ));
                             }
                         };
 
@@ -182,13 +187,13 @@ impl TcpHandler {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "Proxy request can't have socks as proxy protocol",
-                ))
+                ));
             }
             SupportedProtocols::DIRECT => {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "Proxy request can't have direct as proxy protocol",
-                ))
+                ));
             }
         };
 
@@ -261,15 +266,29 @@ impl TcpHandler {
         &self,
         request: InboundRequest,
         inbound_stream: StandardTcpStream<T>,
+        outbound_config: &'static OutboundConfig,
     ) -> io::Result<()> {
         // Establish the initial connection with remote server
         let connection = match self.destination {
-            Some(dest) => TcpStream::connect(dest).await?,
+            Some(dest) => {
+                // TcpStream::connect(dest).await?
+                match &outbound_config.use_http_proxy {
+                    Some(http_proxy) => {
+                        let mut stream = TcpStream::connect(http_proxy).await?;
+                        // TcpStream::connect(dest).await?
+                        http_connect_tokio(&mut stream, &dest.ip().to_string(), dest.port())
+                            .await
+                            .map_err(|e| Error::new(ErrorKind::NotConnected, e.to_string()))?;
+                        stream
+                    }
+                    None => TcpStream::connect(dest).await?,
+                }
+            }
             None => {
                 return Err(Error::new(
                     ErrorKind::NotConnected,
                     "missing address of the remote server",
-                ))
+                ));
             }
         };
 
@@ -323,7 +342,7 @@ impl TcpHandler {
                 }
             }
             SupportedProtocols::SOCKS => {
-                return Err(Error::new(ErrorKind::Unsupported, "Unsupported protocol"))
+                return Err(Error::new(ErrorKind::Unsupported, "Unsupported protocol"));
             }
             SupportedProtocols::DIRECT => {
                 return Err(Error::new(ErrorKind::Unsupported, "Unsupported protocol"));
@@ -360,7 +379,7 @@ impl TcpHandler {
                 return Err(Error::new(
                     ErrorKind::ConnectionRefused,
                     "Failed to connect to remote GRPC server",
-                ))
+                ));
             }
         };
 
@@ -386,7 +405,7 @@ impl TcpHandler {
                 return Err(Error::new(
                     ErrorKind::ConnectionRefused,
                     "failed to write request data",
-                ))
+                ));
             }
         };
 
@@ -410,7 +429,7 @@ impl TcpHandler {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "Bind command is not supported in Trojan protocol",
-                ))
+                ));
             }
         }
 
@@ -453,7 +472,7 @@ async fn copy_server_grpc_reader_to_client_writer<
                     return Err(Error::new(
                         ErrorKind::ConnectionReset,
                         "Received error from GRPC server",
-                    ))
+                    ));
                 }
             },
             None => return Ok(()),

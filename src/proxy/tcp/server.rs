@@ -42,7 +42,10 @@ pub async fn start(
                 }
             };
 
-            match handler.dispatch(inbound_stream, request).await {
+            match handler
+                .dispatch(inbound_stream, request, &outbound_config)
+                .await
+            {
                 Ok(_) => {
                     info!("Connection from {} has finished", addr);
                 }
