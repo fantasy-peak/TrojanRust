@@ -1,8 +1,10 @@
 use clap::Arg;
 use clap::{ArgMatches, Command};
+use env_logger::Builder;
 use lazy_static::lazy_static;
 use log::info;
-use std::io::Result;
+use std::io::{Error, ErrorKind, Result};
+use std::str::FromStr;
 use trojan_rust::config::base::{InboundConfig, InboundMode, OutboundConfig};
 use trojan_rust::config::parser::read_config;
 use trojan_rust::proxy::grpc;
@@ -35,7 +37,11 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".to_string());
+    let level = log::LevelFilter::from_str(&log_level)
+        .map_err(|e| Error::new(ErrorKind::InvalidInput, e.to_string()))?;
+
+    Builder::new().filter(None, level).init();
 
     info!(
         "Reading trojan configuration file from {}",
