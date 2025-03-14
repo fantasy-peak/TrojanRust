@@ -1,5 +1,5 @@
 use crate::config::base::{OutboundConfig, OutboundMode};
-use crate::config::tls::make_client_config;
+use crate::config::tls::{NoCertificateVerification, make_client_config};
 use crate::protocol::common::request::{InboundRequest, TransportProtocol};
 use crate::protocol::common::stream::StandardTcpStream;
 use crate::protocol::trojan::{self, HEX_SIZE, handshake};
@@ -212,14 +212,14 @@ impl TcpHandler {
     ) -> io::Result<()> {
         // Dial remote proxy server
         let _roots = rustls::RootCertStore::empty();
+        let mut client_crypto: ClientConfig = ClientConfig::builder()
+            .with_root_certificates(_roots)
+            .with_no_client_auth();
 
-        // let mut client_crypto = rustls::ClientConfig::builder()
-        //     .with_safe_defaults()
-        //     .with_custom_certificate_verifier(Arc::new(NoCertificateVerification {}))
-        //     .with_no_client_auth();
+        client_crypto
+            .dangerous()
+            .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
 
-        let _verifier = Verifier::new();
-        let mut client_crypto = rustls_platform_verifier::tls_config();
         client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
         // Create client

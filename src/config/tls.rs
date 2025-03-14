@@ -1,5 +1,7 @@
-use crate::config::base::{InboundTlsConfig, OutboundTlsConfig};
 use log::{error, info};
+
+use std::sync::Arc;
+
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::aws_lc_rs::default_provider;
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature};
@@ -7,8 +9,8 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, ServerConfig};
 use rustls::{DigitallySignedStruct, Error};
 use rustls::{RootCertStore, SignatureScheme};
-use std::sync::Arc;
 
+use crate::config::base::{InboundTlsConfig, OutboundTlsConfig};
 /// Stub Certificate verifier that skips certificate verification. It is used when the user
 /// explicitly allows insecure TLS connection in configuration file, by setting
 ///
@@ -121,26 +123,21 @@ pub fn make_client_config(config: &OutboundTlsConfig) -> ClientConfig {
 /// }
 /// ```
 pub fn make_server_config(config: &InboundTlsConfig) -> Option<ServerConfig> {
-    info!("111ssssssssssssssssssssssssssssssss");
     let Ok(cert_file) = std::fs::read(&config.cert_path) else {
+        info!("can't read {}", config.cert_path);
         return None;
     };
     let Ok(key_file) = std::fs::read(&config.key_path) else {
+        info!("can't read {}", config.key_path);
         return None;
     };
 
-    println!("Loading certificate and key...");
-
-    let Ok(certs) = rustls_pemfile::certs(&mut &*cert_file).collect::<Result<Vec<_>, _>>() else {
-        return None;
-    };
-
-    let certs = certs
+    let certs = rustls_pemfile::certs(&mut &*cert_file)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?
         .into_iter()
         .map(CertificateDer::from)
         .collect::<Vec<_>>();
-
-    println!("Certificate loaded successfully");
 
     let key = {
         let mut reader = &mut &*key_file;
@@ -149,36 +146,33 @@ pub fn make_server_config(config: &InboundTlsConfig) -> Option<ServerConfig> {
         for item in rustls_pemfile::read_all(&mut reader) {
             match item {
                 Ok(rustls_pemfile::Item::Pkcs1Key(key)) => {
-                    error!("Found PKCS1 key");
+                    info!("Found PKCS1 key");
                     private_keys.push(PrivateKeyDer::Pkcs1(key));
                 }
                 Ok(rustls_pemfile::Item::Pkcs8Key(key)) => {
-                    error!("Found PKCS8 key");
+                    info!("Found PKCS8 key");
                     private_keys.push(PrivateKeyDer::Pkcs8(key));
                 }
                 Ok(rustls_pemfile::Item::Sec1Key(key)) => {
-                    error!("Found Sec1 key");
+                    info!("Found Sec1Key key");
                     private_keys.push(PrivateKeyDer::Sec1(key));
                 }
                 Ok(_) => error!("Found other item"),
                 Err(e) => error!("Error reading key: {}", e),
             }
         }
-        private_keys.into_iter().next().unwrap()
+        private_keys.into_iter().next()
     };
 
-    println!("Private key loaded successfully");
+    let Some(key) = key else {
+        error!("Private key loaded fail");
+        return None;
+    };
 
     let cfg = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .expect("bad certificate/key");
-
-    // let cfg = ServerConfig::builder()
-    //     // .with_safe_defaults()
-    //     .with_no_client_auth()
-    //     .with_single_cert(certificates, key.into_iter().next().unwrap())
-    //     .expect("bad certificate/key");
 
     Some(cfg)
 }
