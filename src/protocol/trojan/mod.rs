@@ -10,6 +10,8 @@ pub use self::parser::parse_and_authenticate;
 use crate::protocol::common::addr::IpAddress;
 use crate::protocol::common::{request::InboundRequest, stream::StandardTcpStream};
 
+use log::error;
+use std::io::ErrorKind;
 use std::io::Result;
 use std::net::IpAddr;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -20,9 +22,20 @@ pub async fn accept<T: AsyncRead + AsyncWrite + Unpin + Send>(
     secret: &[u8],
 ) -> Result<(InboundRequest, StandardTcpStream<T>)> {
     // Read trojan request header and generate request header
-    let request = parse_and_authenticate(&mut stream, secret).await?;
-
-    Ok((request.into_request(), stream))
+    match parse_and_authenticate(&mut stream, secret).await {
+        Ok(request) => Ok((request.into_request(), stream)),
+        Err(e) if e.kind() == ErrorKind::InvalidData => {
+            let response = "HTTP/1.1 301 Moved Permanently\r\n\
+                            Location: https://www.baidu.com\r\n\
+                            Content-Length: 0\r\n\
+                            \r\n";
+            if let Err(e) = stream.write_all(response.as_bytes()).await {
+                error!("Failed to send response: {}", e);
+            }
+            Err(e)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Helper function to establish Trojan connection to remote server
