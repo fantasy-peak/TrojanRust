@@ -47,7 +47,7 @@ pub async fn start(
                 .as_bytes()
                 .to_vec()
         }
-        _ => Vec::new()
+        _ => Vec::new(),
     };
     _ = TROJAN_SECRET.set(hex);
 
@@ -59,18 +59,19 @@ pub async fn start(
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
                     "Failed to build TLS configuration for QUIC",
-                ))
+                ));
             }
         },
         None => {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "QUIC protocol must have TLS configuration",
-            ))
+            ));
         }
     };
     tls_config.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
+    /*
     // Build server tls configuration
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(tls_config));
     let mut transport_config = quinn::TransportConfig::default();
@@ -161,6 +162,7 @@ pub async fn start(
             }
         });
     }
+    */
 
     Ok(())
 }

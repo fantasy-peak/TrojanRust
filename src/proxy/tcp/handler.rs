@@ -1,5 +1,5 @@
 use crate::config::base::{OutboundConfig, OutboundMode};
-use crate::config::tls::{NoCertificateVerification, make_client_config};
+use crate::config::tls::make_client_config;
 use crate::protocol::common::request::{InboundRequest, TransportProtocol};
 use crate::protocol::common::stream::StandardTcpStream;
 use crate::protocol::trojan::{self, HEX_SIZE, handshake};
@@ -12,7 +12,8 @@ use futures::Stream;
 use log::{info, warn};
 use once_cell::sync::OnceCell;
 use quinn::Endpoint;
-use rustls::{ClientConfig, ServerName};
+use rustls::ClientConfig;
+use rustls::pki_types::ServerName;
 use sha2::{Digest, Sha224};
 use std::io::{self, Cursor, Error, ErrorKind};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -24,6 +25,8 @@ use tokio_rustls::TlsConnector;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
+
+use rustls_platform_verifier::Verifier;
 
 /// A list of ALPN that the client should support.
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29", b"h2", b"h3"];
@@ -39,7 +42,7 @@ pub struct TcpHandler {
     mode: OutboundMode,
     protocol: SupportedProtocols,
     destination: Option<SocketAddr>,
-    tls: Option<(Arc<ClientConfig>, ServerName)>,
+    tls: Option<(Arc<ClientConfig>, String)>,
     secret: Vec<u8>,
 }
 
@@ -52,11 +55,9 @@ impl TcpHandler {
         let tls = match &outbound.tls {
             Some(cfg) => {
                 let client_config = make_client_config(&cfg);
-                Some((
-                    Arc::new(client_config),
-                    ServerName::try_from(cfg.host_name.as_ref())
-                        .expect("Failed to parse host name"),
-                ))
+                // let server_name =
+                //     rustls::pki_types::ServerName::try_from(cfg.host_name.clone()).unwrap();
+                Some((Arc::new(client_config), cfg.host_name.clone()))
             }
             None => None,
         };
@@ -211,10 +212,14 @@ impl TcpHandler {
     ) -> io::Result<()> {
         // Dial remote proxy server
         let _roots = rustls::RootCertStore::empty();
-        let mut client_crypto = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification {}))
-            .with_no_client_auth();
+
+        // let mut client_crypto = rustls::ClientConfig::builder()
+        //     .with_safe_defaults()
+        //     .with_custom_certificate_verifier(Arc::new(NoCertificateVerification {}))
+        //     .with_no_client_auth();
+
+        let _verifier = Verifier::new();
+        let mut client_crypto = rustls_platform_verifier::tls_config();
         client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
         // Create client
@@ -230,7 +235,7 @@ impl TcpHandler {
                 return Err(e);
             }
         };
-        endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
+        // endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
 
         // Establish connection with remote proxy server using QUIC protocol
         let connection = match endpoint.connect("127.0.0.1:8081".parse().unwrap(), "example.com") {
@@ -296,9 +301,8 @@ impl TcpHandler {
         let mut outbound_stream = match &self.tls {
             Some((client_config, domain)) => {
                 let connector = TlsConnector::from(Arc::clone(client_config));
-                StandardTcpStream::RustlsClient(
-                    connector.connect(domain.clone(), connection).await?,
-                )
+                let server_name = rustls::pki_types::ServerName::try_from(domain.clone()).unwrap();
+                StandardTcpStream::RustlsClient(connector.connect(server_name, connection).await?)
             }
             None => StandardTcpStream::Plain(connection),
         };
